@@ -14,6 +14,7 @@ GNU General Public License for more details.
 */
 #include <config.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <functional>
@@ -100,22 +101,32 @@ inline std::ostream& operator<<(std::ostream& os, hex h)
   return os;
 }
 
+void print_buffer(std::ostream& os, const std::uint8_t *begin,
+                  std::size_t length)
+{
+  auto fill {os.fill('0')};
+  auto flags {os.flags(std::ios_base::hex | std::ios_base::right)};
+
+  std::for_each(begin, begin + length, [&](auto b) {
+    os << std::setw(2) << static_cast<unsigned int>(b) << ' ';
+  });
+
+  os.flags(flags);
+  os.fill(fill);
+}
+
 static void scsi_execute(const std::string& device, const std::uint8_t *cmd_p,
                          std::size_t cmd_len, std::uint8_t *dxfer_p,
                          std::size_t dxfer_len, scsi_direction direction)
 {
 #if defined(DEBUGSCSI)
   std::cerr << "SCSI Command: ";
-  for (std::size_t i = 0; i < cmd_len; i++) {
-    std::cerr << hex {cmd_p[i]} << ' ';
-  }
+  print_buffer(std::cerr, cmd_p, cmd_len);
   std::cerr << '\n';
 
   if (direction == scsi_direction::to_device && dxfer_len > 0u) {
     std::cerr << "SCSI Data: ";
-    for (std::size_t i = 0; i < dxfer_len; i++) {
-      std::cerr << hex {dxfer_p[i]} << ' ';
-    }
+    print_buffer(std::cerr, dxfer_p, dxfer_len);
     std::cerr << '\n';
   }
 #endif
@@ -200,8 +211,8 @@ bool is_device_ready(const std::string& device)
   }
 }
 
-void get_des(const std::string& device, std::uint8_t *buffer,
-             std::size_t length)
+const page_des& get_des(const std::string& device, std::uint8_t *buffer,
+                        std::size_t length)
 {
   const std::uint8_t spin_des_command[] {
       SSP_SPIN_OPCODE,
@@ -216,22 +227,20 @@ void get_des(const std::string& device, std::uint8_t *buffer,
   };
   scsi_execute(device, spin_des_command, sizeof(spin_des_command), buffer,
                length, scsi_direction::from_device);
+  auto& page {reinterpret_cast<const page_des&>(*buffer)};
 
 #if defined(DEBUGSCSI)
   std::cerr << "SCSI Response: ";
-  auto& page {reinterpret_cast<const page_des&>(*buffer)};
-  std::uint8_t *it {buffer};
-  const std::uint8_t *end {
-      buffer + std::min(length, sizeof(page_header) + ntohs(page.length))};
-  while (it < end) {
-    std::cerr << hex {*it++} << ' ';
-  }
+  print_buffer(std::cerr, buffer,
+               std::min(length, sizeof(page_header) + ntohs(page.length)));
   std::cerr << '\n';
 #endif
+
+  return page;
 }
 
-void get_nbes(const std::string& device, std::uint8_t *buffer,
-              std::size_t length)
+const page_nbes& get_nbes(const std::string& device, std::uint8_t *buffer,
+                          std::size_t length)
 {
   const std::uint8_t spin_nbes_command[] {
       SSP_SPIN_OPCODE,
@@ -246,22 +255,20 @@ void get_nbes(const std::string& device, std::uint8_t *buffer,
   };
   scsi_execute(device, spin_nbes_command, sizeof(spin_nbes_command), buffer,
                length, scsi_direction::from_device);
+  auto& page {reinterpret_cast<const page_nbes&>(*buffer)};
 
 #if defined(DEBUGSCSI)
   std::cerr << "SCSI Response: ";
-  auto& page {reinterpret_cast<const page_nbes&>(*buffer)};
-  std::uint8_t *it {buffer};
-  const std::uint8_t *end {
-      buffer + std::min(length, sizeof(page_header) + ntohs(page.length))};
-  while (it < end) {
-    std::cerr << hex {*it++} << ' ';
-  }
+  print_buffer(std::cerr, buffer,
+               std::min(length, sizeof(page_header) + ntohs(page.length)));
   std::cerr << '\n';
 #endif
+
+  return page;
 }
 
-void get_dec(const std::string& device, std::uint8_t *buffer,
-             std::size_t length)
+const page_dec& get_dec(const std::string& device, std::uint8_t *buffer,
+                        std::size_t length)
 {
   const std::uint8_t spin_dec_command[] {
       SSP_SPIN_OPCODE,
@@ -276,18 +283,16 @@ void get_dec(const std::string& device, std::uint8_t *buffer,
   };
   scsi_execute(device, spin_dec_command, sizeof(spin_dec_command), buffer,
                length, scsi_direction::from_device);
+  auto& page {reinterpret_cast<const page_dec&>(*buffer)};
 
 #if defined(DEBUGSCSI)
   std::cerr << "SCSI Response: ";
-  auto& page {reinterpret_cast<const page_dec&>(*buffer)};
-  std::uint8_t *it {buffer};
-  const std::uint8_t *end {
-      buffer + std::min(length, sizeof(page_header) + ntohs(page.length))};
-  while (it < end) {
-    std::cerr << hex {*it++} << ' ';
-  }
+  print_buffer(std::cerr, buffer,
+               std::min(length, sizeof(page_header) + ntohs(page.length)));
   std::cerr << '\n';
 #endif
+
+  return page;
 }
 
 inquiry_data get_inquiry(const std::string& device)
@@ -302,14 +307,9 @@ inquiry_data get_inquiry(const std::string& device)
 
 #if defined(DEBUGSCSI)
   std::cerr << "SCSI Response: ";
-  std::uint8_t *it {reinterpret_cast<std::uint8_t *>(&inq)};
-  const std::uint8_t *end {
-      reinterpret_cast<std::uint8_t *>(&inq) +
-      std::min(sizeof(inquiry_data),
-               inquiry_data::header_size + inq.additional_length)};
-  while (it < end) {
-    std::cerr << hex {*it++} << ' ';
-  }
+  print_buffer(std::cerr, reinterpret_cast<std::uint8_t *>(&inq),
+               std::min(sizeof(inquiry_data),
+                        inquiry_data::header_size + inq.additional_length));
   std::cerr << '\n';
 #endif
 
@@ -425,9 +425,7 @@ void print_sense_data(std::ostream& os, const sense_data& sd)
   auto rawsense {reinterpret_cast<const std::uint8_t *>(&sd)};
 
   os << std::left << std::setw(25) << " Raw sense data:";
-  for (std::size_t i = 0; i < sense_data_length; i++) {
-    os << hex {rawsense[i]} << ' ';
-  }
+  print_buffer(os, rawsense, sense_data_length);
   os << '\n';
 #endif
 }

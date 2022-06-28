@@ -411,13 +411,13 @@ bool is_device_ready(const std::string& device);
 // Get SCSI inquiry data from device
 inquiry_data get_inquiry(const std::string& device);
 // Get data encryption status page
-void get_des(const std::string& device, std::uint8_t *buffer,
+const page_des& get_des(const std::string& device, std::uint8_t *buffer,
              std::size_t length);
 // Get next block encryption status page
-void get_nbes(const std::string& device, std::uint8_t *buffer,
+const page_nbes& get_nbes(const std::string& device, std::uint8_t *buffer,
               std::size_t length);
 // Get device encryption capabilities
-void get_dec(const std::string& device, std::uint8_t *buffer,
+const page_dec& get_dec(const std::string& device, std::uint8_t *buffer,
              std::size_t length);
 // Fill out a set data encryption page with parameters.
 // Result is allocated and returned as a std::unique_ptr and should

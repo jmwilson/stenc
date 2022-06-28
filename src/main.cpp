@@ -119,10 +119,12 @@ algorithm indexes.\n";
 
 static void print_algorithm_name(std::ostream& os, const std::uint32_t code)
 {
+  auto fill {os.fill('0')};
+  auto flags {os.flags(std::ios_base::hex | std::ios_base::right)};
+
   // Reference: SFSC / INCITS 501-2016
   if (0x80010400 <= code && code <= 0x8001FFFF) {
-    os << "Vendor specific 0x" << std::setw(8) << std::setfill('0') << std::hex
-       << code << std::setfill(' ');
+    os << "Vendor specific 0x" << std::setw(8) << code;
   }
   switch (code) {
   case 0x0001000C:
@@ -138,16 +140,20 @@ static void print_algorithm_name(std::ostream& os, const std::uint32_t code)
     os << "AES-256-XTS-HMAC-SHA-512";
     break;
   default:
-    os << "Unknown 0x" << std::setw(8) << std::setfill('0') << std::hex << code
-       << std::setfill(' ');
+    os << "Unknown 0x" << std::setw(8) << code;
   }
+
+  os.flags(flags);
+  os.fill(fill);
 }
 
-static void print_algorithms(std::ostream& os, const scsi::page_dec& page)
+static void print_algorithms(
+    std::ostream& os,
+    std::vector<std::reference_wrapper<const scsi::algorithm_descriptor>> ads)
 {
   os << "Supported algorithms:\n";
 
-  for (const scsi::algorithm_descriptor& ad: scsi::read_algorithms(page)) {
+  for (const scsi::algorithm_descriptor& ad: ads) {
     os << std::left << std::setw(5)
        << static_cast<unsigned int>(ad.algorithm_index);
     print_algorithm_name(os, ntohl(ad.security_algorithm_code));
@@ -486,14 +492,12 @@ int main(int argc, char **argv)
 
     try {
       print_device_inquiry(std::cout, scsi::get_inquiry(tapeDrive));
-      scsi::get_des(tapeDrive, buffer, sizeof(buffer));
       print_device_status(std::cout,
-                          reinterpret_cast<const scsi::page_des&>(buffer));
+                          scsi::get_des(tapeDrive, buffer, sizeof(buffer)));
       if (scsi::is_device_ready(tapeDrive)) {
         try {
-          scsi::get_nbes(tapeDrive, buffer, sizeof(buffer));
-          print_volume_status(std::cout,
-                              reinterpret_cast<const scsi::page_nbes&>(buffer));
+          print_volume_status(
+              std::cout, scsi::get_nbes(tapeDrive, buffer, sizeof(buffer)));
         } catch (const scsi::scsi_error& err) {
           // #71: ignore BLANK CHECK sense key that some drives may return
           // during media access check in getting NBES
@@ -504,9 +508,8 @@ int main(int argc, char **argv)
           }
         }
       }
-      scsi::get_dec(tapeDrive, buffer, sizeof(buffer));
-      print_algorithms(std::cout,
-                       reinterpret_cast<const scsi::page_dec&>(buffer));
+      print_algorithms(std::cout, scsi::read_algorithms(scsi::get_dec(
+                                      tapeDrive, buffer, sizeof(buffer))));
       std::exit(EXIT_SUCCESS);
     } catch (const scsi::scsi_error& err) {
       std::cerr << "stenc: " << err.what() << '\n';
@@ -587,9 +590,8 @@ int main(int argc, char **argv)
   }
 
   try {
-    scsi::get_dec(tapeDrive, buffer, sizeof(buffer));
-    auto& dec_page {reinterpret_cast<const scsi::page_dec&>(buffer)};
-    auto algorithms {scsi::read_algorithms(dec_page)};
+    auto algorithms {scsi::read_algorithms(
+        scsi::get_dec(tapeDrive, buffer, sizeof(buffer)))};
 
     if (algorithm_index == std::nullopt) {
       if (algorithms.size() == 1) {
@@ -602,7 +604,7 @@ int main(int argc, char **argv)
         algorithm_index = ad.algorithm_index;
       } else {
         std::cerr << "stenc: Algorithm index not specified\n";
-        print_algorithms(std::cerr, dec_page);
+        print_algorithms(std::cerr, algorithms);
         std::exit(EXIT_FAILURE);
       }
     }
@@ -695,8 +697,7 @@ int main(int argc, char **argv)
                                     algorithm_index.value(), key, key_name,
                                     kad_format, rdmc, ckod)};
     scsi::write_sde(tapeDrive, sde_buffer.get());
-    scsi::get_des(tapeDrive, buffer, sizeof(buffer));
-    auto& opt {reinterpret_cast<const scsi::page_des&>(buffer)};
+    auto& opt {scsi::get_des(tapeDrive, buffer, sizeof(buffer))};
     std::ostringstream oss;
 
     oss << "Encryption settings changed for device " << tapeDrive
